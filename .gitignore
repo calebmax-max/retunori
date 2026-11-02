@@ -1,0 +1,40 @@
+# Dependencies
+node_modules/
+.venv/
+venv/
+
+# Frontend build and caches
+frontend/dist/
+frontend/.vite/
+.vite/
+
+# Backend runtime files
+backend/__pycache__/
+backend/**/__pycache__/
+backend/.pytest_cache/
+backend/htmlcov/
+backend/*.db
+backend/*.sqlite
+backend/*.sqlite3
+backend/*.db.*
+
+# Environment and secrets
+.env
+.env.*
+!.env.example
+backend/.env
+
+# Uploaded media and generated backups
+backend/media/
+backend/backups/
+backend/app/backups/
+
+# Python tooling
+*.py[cod]
+.pytest_cache/
+.coverage
+
+# Logs and local OS files
+*.log
+.DS_Store
+Thumbs.db
