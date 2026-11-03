@@ -311,7 +311,7 @@ def update_my_profile(payload: ProfileUpdate, user: User = Depends(require_roles
 @app.get("/api/retreats", response_model=list[RetreatOut])
 def public_retreats(db: Session = Depends(get_db)):
     _sync_sales_windows(db)
-    retreats = db.scalars(select(Retreat).where(Retreat.status == RetreatStatus.published).order_by(Retreat.starts_at)).all()
+    retreats = db.scalars(select(Retreat).where(Retreat.status == RetreatStatus.published, Retreat.starts_at > site_now()).order_by(Retreat.starts_at)).all()
     return [_public_retreat_data(db, retreat) for retreat in retreats]
 
 
@@ -351,7 +351,7 @@ def _public_retreat_data(db: Session, retreat: Retreat) -> dict:
 @app.get("/api/homepage")
 def homepage(db: Session = Depends(get_db)):
     content = db.scalar(select(HomepageContent).order_by(HomepageContent.id)).__dict__ if db.scalar(select(HomepageContent).order_by(HomepageContent.id)) else {"headline": "Make room for what matters.", "introduction": "Intentional retreats for meaningful connection.", "support_email": "hello@retunori.com", "support_phone": ""}
-    featured = db.scalars(select(Retreat).join(FeaturedRetreat, FeaturedRetreat.retreat_id == Retreat.id).where(Retreat.status == RetreatStatus.published).order_by(FeaturedRetreat.sort_order)).all()
+    featured = db.scalars(select(Retreat).join(FeaturedRetreat, FeaturedRetreat.retreat_id == Retreat.id).where(Retreat.status == RetreatStatus.published, Retreat.starts_at > site_now()).order_by(FeaturedRetreat.sort_order)).all()
     content.pop("_sa_instance_state", None)
     return {"content": content, "featured_retreats": [_public_retreat_data(db, retreat) for retreat in featured]}
 
@@ -360,6 +360,7 @@ def public_retreat(slug: str, db: Session = Depends(get_db)):
     _sync_sales_windows(db)
     retreat = db.scalar(select(Retreat).where(Retreat.slug == slug, Retreat.status == RetreatStatus.published))
     if not retreat: raise HTTPException(404, "Retreat not found")
+    if retreat.starts_at <= site_now(): raise HTTPException(404, "Retreat not found")
     return _public_retreat_data(db, retreat)
 
 

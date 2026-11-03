@@ -10,3 +10,6 @@
 .admin-action-status{margin:4px 0;padding:12px 14px;border-radius:8px;font-size:13px;font-weight:700}.admin-action-status.success{border:1px solid #76d0a0;background:#edf9f3;color:#174f32}.admin-action-status.error{border:1px solid #d97979;background:#fff0f0;color:#7c2525}
 .manage-grid{display:grid;grid-template-columns:1.2fr .8fr;gap:18px;margin-top:38px}.manage-stack{display:grid;gap:18px}.manage-form{display:grid;gap:12px;padding:25px}.manage-form h3{margin:0}.manage-form input,.manage-form textarea{background:#080b13;border:1px solid var(--line);border-radius:7px;color:white;padding:13px;font:13px Manrope}.manage-form textarea{min-height:100px;resize:vertical}@media(max-width:700px){.manage-grid{grid-template-columns:1fr}}
 .detail-support{grid-template-columns:1fr}@media(max-width:700px){.countdown span{min-width:60px}.detail-support{margin-top:45px}}
+
+.countdown{gap:12px}.countdown span{min-width:92px;padding:14px 12px;gap:5px}.countdown strong{font-size:30px;font-weight:800;line-height:1}.countdown small{font-size:11px;font-weight:700;text-transform:uppercase;letter-spacing:.12em}
+@media(max-width:700px){.countdown{width:100%;display:grid;grid-template-columns:repeat(3,minmax(0,1fr));gap:8px}.countdown span{min-width:0;padding:12px 8px}}

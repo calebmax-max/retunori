@@ -28,6 +28,14 @@ const AdminTickets = lazy(() => import('./AdminData').then(module => ({ default:
 
 const api = axios.create({ baseURL: '/api' })
 
+const publicDataCache = new Map()
+
+const getCachedPublicData = async (key, request) => {
+  const response = await request()
+  publicDataCache.set(key, response.data)
+  return response.data
+}
+
 const wallClockDate = value => {
   if (!value) return null
   const match = String(value).trim().match(/^(\d{4})-(\d{2})-(\d{2})T(\d{2}):(\d{2})/)
@@ -113,24 +121,37 @@ function Layout({ children }) {
   return <><Header/><main>{children}</main><footer><div className="brand"><span className="brand-mark">R</span><span>RETUNORI</span></div><span>Retreats · Experiences · Connections</span><span>© 2026 RETUNORI</span></footer></>
 }
 function RetreatCard({ retreat, tickets = [] }) { const image = retreat.images?.[0]?.url || retreat.poster_url; const isOpen = registrationIsOpen(retreat); const hasTicket = tickets.some(ticket => ticket.retreat_title === retreat.title); return <article className="retreat-card"><div className="poster">{image && <img className="poster-image" src={image} alt={retreat.images?.[0]?.alt_text || retreat.title} loading="lazy" decoding="async" onError={event => { event.currentTarget.style.display = 'none' }}/>}<div className="poster-glow"/><span>RETUNORI<br/><b>{new Date(retreat.starts_at).toLocaleDateString('en-GB', { month: 'short', year: 'numeric' }).toUpperCase()}</b></span></div><div className="card-body"><div className="eyebrow">{hasTicket ? 'TICKET BOOKED' : retreat.remaining_capacity === 0 ? 'SOLD OUT' : isOpen ? 'REGISTRATION OPEN' : 'REGISTRATION CLOSED'}</div><h3>{retreat.title}</h3><p className="muted"><CalendarDays size={15}/> {new Date(retreat.starts_at).toLocaleDateString('en-GB', { day: 'numeric', month: 'long', year: 'numeric' })}</p><p className="muted"><MapPin size={15}/> {retreat.venue}</p>{retreat.sales_closes_at && <p className="registration-deadline">Registration {isOpen ? 'open until' : 'closed on'} {registrationDeadline(retreat.sales_closes_at)}</p>}<p className="muted availability">{hasTicket ? 'Your place is confirmed' : `${retreat.remaining_capacity} places remaining`}</p><div className="card-footer"><strong>KES {retreat.is_free ? 'FREE' : retreat.price_kes.toLocaleString()}</strong><Link to={`/retreats/${retreat.slug}`} className="icon-link">{hasTicket ? 'View ticket' : 'Explore'} <ArrowRight size={16}/></Link></div></div></article> }
-function EventCountdown({ target }) { const [left, setLeft] = useState(Math.max(0, new Date(target).getTime() - Date.now())); useEffect(() => { const timer = window.setInterval(() => setLeft(Math.max(0, new Date(target).getTime() - Date.now())), 1000); return () => window.clearInterval(timer) }, [target]); const days = Math.floor(left / 86400000); const hours = Math.floor(left / 3600000) % 24; const minutes = Math.floor(left / 60000) % 60; const seconds = Math.floor(left / 1000) % 60; return <div className="event-countdown"><span><strong>{days}</strong><small>Days</small></span><span><strong>{String(hours).padStart(2, '0')}</strong><small>Hours</small></span><span><strong>{String(minutes).padStart(2, '0')}</strong><small>Minutes</small></span><span><strong>{String(seconds).padStart(2, '0')}</strong><small>Seconds</small></span></div> }
-function Home() {
-  const [retreats, setRetreats] = useState([]); const [home, setHome] = useState(null); const [tickets, setTickets] = useState([]); const [now, setNow] = useState(Date.now())
+function EventCountdown({ target }) {
+  const targetTime = wallClockDate(target)?.getTime() || 0
+  const [left, setLeft] = useState(Math.max(0, targetTime - Date.now()))
   useEffect(() => {
-    Promise.all([api.get('/retreats'), api.get('/homepage')]).then(([retreatResponse, homeResponse]) => { setRetreats(retreatResponse.data); setHome(homeResponse.data) }).catch(() => {})
+    const timer = window.setInterval(() => setLeft(Math.max(0, targetTime - Date.now())), 1000)
+    return () => window.clearInterval(timer)
+  }, [targetTime])
+  const days = Math.floor(left / 86400000)
+  const hours = Math.floor(left / 3600000) % 24
+  const minutes = Math.floor(left / 60000) % 60
+  const seconds = Math.floor(left / 1000) % 60
+  return <div className="event-countdown"><span><strong>{days}</strong><small>Days</small></span><span><strong>{String(hours).padStart(2, '0')}</strong><small>Hours</small></span><span><strong>{String(minutes).padStart(2, '0')}</strong><small>Minutes</small></span><span><strong>{String(seconds).padStart(2, '0')}</strong><small>Seconds</small></span></div>
+}
+function Home() {
+  const [retreats, setRetreats] = useState(() => publicDataCache.get('/retreats') || []); const [home, setHome] = useState(() => publicDataCache.get('/homepage') || null); const [tickets, setTickets] = useState([]); const [now, setNow] = useState(Date.now())
+  useEffect(() => {
+    Promise.all([getCachedPublicData('/retreats', () => api.get('/retreats')), getCachedPublicData('/homepage', () => api.get('/homepage'))]).then(([retreatData, homeData]) => { setRetreats(retreatData); setHome(homeData) }).catch(() => {})
     let user = null
     try { user = JSON.parse(localStorage.getItem('retunori_user') || 'null') } catch {}
     if (localStorage.getItem('retunori_token') && user?.role === 'attendee') {
       api.get('/me/tickets').then(response => setTickets(response.data)).catch(() => {})
     }
   }, [])
-  useEffect(() => { const timer = window.setInterval(() => setNow(Date.now()), 30000); return () => window.clearInterval(timer) }, [])
-  const featured = home?.featured_retreats?.length ? home.featured_retreats : retreats
-  const upcomingRetreats = [...retreats].filter(item => new Date(item.ends_at).getTime() >= now).sort((a, b) => {
-    const aTime = new Date(a.starts_at).getTime() <= now ? -1 : new Date(a.starts_at).getTime()
-    const bTime = new Date(b.starts_at).getTime() <= now ? -1 : new Date(b.starts_at).getTime()
+  useEffect(() => { const timer = window.setInterval(() => setNow(Date.now()), 1000); return () => window.clearInterval(timer) }, [])
+  const upcomingFeatured = (home?.featured_retreats || []).filter(item => wallClockDate(item.starts_at)?.getTime() > now)
+  const upcomingRetreats = [...retreats].filter(item => wallClockDate(item.starts_at)?.getTime() > now).sort((a, b) => {
+    const aTime = wallClockDate(a.starts_at)?.getTime() || 0
+    const bTime = wallClockDate(b.starts_at)?.getTime() || 0
     return aTime - bTime
   })
+  const featured = upcomingFeatured.length ? upcomingFeatured : upcomingRetreats
   const heroRetreat = upcomingRetreats[0]
   return <>
     <section className="event-hero">
@@ -161,8 +182,39 @@ function Home() {
     <section className="event-cta"><div className="eyebrow">YOUR NEXT GOOD MOMENT</div><h2>Come as you are.<br/><em>Find your people.</em></h2><Link className="button primary" to="/retreats">Explore all events <ArrowRight size={17}/></Link></section>
   </>
 }
-function Retreats() { const [retreats, setRetreats] = useState([]); const [tickets, setTickets] = useState([]); const [query, setQuery] = useState(''); useEffect(() => { api.get('/retreats').then(response => setRetreats(response.data)).catch(() => {}); if (localStorage.getItem('retunori_token')) api.get('/me/tickets').then(response => setTickets(response.data)).catch(() => {}) }, []); const visible = retreats.filter(item => `${item.title} ${item.venue}`.toLowerCase().includes(query.toLowerCase())); return <section className="page section events-page"><div className="events-heading"><div><div className="eyebrow">THE RETUNORI CALENDAR</div><h1>Find your next<br/><em>good pause.</em></h1><p className="lead">Choose an experience that gives you room to breathe, reflect, and connect.</p></div><div className="events-count"><strong>{retreats.length}</strong><span>upcoming experiences</span></div></div><div className="events-toolbar"><label><span>Search experiences</span><input value={query} onChange={e=>setQuery(e.target.value)} placeholder="Search by title or location"/></label><span>{visible.length} results</span></div><div className="retreat-grid">{visible.map(r => <RetreatCard key={r.slug} retreat={r} tickets={tickets}/>)}</div>{visible.length === 0 && <p className="muted events-empty">No experiences match your search. Try another location or title.</p>}</section> }
-function Detail() { const { slug } = useParams(); const [retreat, setRetreat] = useState(null); const [error, setError] = useState(''); useEffect(() => { api.get(`/retreats/${slug}`).then(r => setRetreat(r.data)).catch(e => setError(e.response?.data?.detail || 'Retreat not found')) }, [slug]); if (error) return <section className="page section"><h1>Retreat unavailable.</h1><p className="muted">{error}</p><Link className="text-link" to="/retreats">Browse retreats</Link></section>; if (!retreat) return <div className="loading">Loading retreat…</div>; return <section className="detail page section"><Link className="text-link" to="/retreats">← All retreats</Link><div className="detail-grid"><div className="retreat-gallery">{retreat.images?.length ? retreat.images.map(image => <img key={image.id} src={image.url} alt={image.alt_text} loading="lazy"/>) : <div className="poster large"><span>RETUNORI<br/><b>{retreat.title}</b></span></div>}</div><div><div className="eyebrow">{retreat.sales_open ? 'REGISTRATION OPEN' : 'COMING SOON'}</div><h1>{retreat.title}</h1><p className="lead">{retreat.description}</p><div className="facts"><span><CalendarDays/> {new Date(retreat.starts_at).toLocaleDateString('en-GB', {day:'numeric',month:'long',year:'numeric'})}</span><span><MapPin/> {retreat.venue}</span><span><Ticket/> KES {retreat.price_kes.toLocaleString()}</span></div><Link to={`/purchase?retreat=${retreat.id}`} className="button primary">Get your ticket <ArrowRight size={17}/></Link></div></div></section> }
+function Retreats() {
+  const [retreats, setRetreats] = useState(() => publicDataCache.get('/retreats') || [])
+  const [tickets, setTickets] = useState([])
+  const [query, setQuery] = useState('')
+  const [now, setNow] = useState(Date.now())
+
+  useEffect(() => {
+    getCachedPublicData('/retreats', () => api.get('/retreats')).then(setRetreats).catch(() => {})
+    if (localStorage.getItem('retunori_token')) api.get('/me/tickets').then(response => setTickets(response.data)).catch(() => {})
+  }, [])
+
+  useEffect(() => {
+    const timer = window.setInterval(() => setNow(Date.now()), 1000)
+    return () => window.clearInterval(timer)
+  }, [])
+
+  const upcoming = retreats.filter(item => wallClockDate(item.starts_at)?.getTime() > now)
+  const visible = upcoming.filter(item => `${item.title} ${item.venue}`.toLowerCase().includes(query.toLowerCase()))
+
+  return <section className="page section events-page">
+    <div className="events-heading">
+      <div><div className="eyebrow">THE RETUNORI CALENDAR</div><h1>Find your next<br/><em>good pause.</em></h1><p className="lead">Choose an experience that gives you room to breathe, reflect, and connect.</p></div>
+      <div className="events-count"><strong>{upcoming.length}</strong><span>upcoming experiences</span></div>
+    </div>
+    <div className="events-toolbar">
+      <label><span>Search experiences</span><input value={query} onChange={e => setQuery(e.target.value)} placeholder="Search by title or location"/></label>
+      <span>{visible.length} results</span>
+    </div>
+    <div className="retreat-grid">{visible.map(retreat => <RetreatCard key={retreat.slug} retreat={retreat} tickets={tickets}/>)}</div>
+    {visible.length === 0 && <p className="muted events-empty">No experiences match your search. Try another location or title.</p>}
+  </section>
+}
+function Detail() {  const { slug } = useParams(); const [retreat, setRetreat] = useState(null); const [error, setError] = useState(''); useEffect(() => { api.get(`/retreats/${slug}`).then(r => setRetreat(r.data)).catch(e => setError(e.response?.data?.detail || 'Retreat not found')) }, [slug]); if (error) return <section className="page section"><h1>Retreat unavailable.</h1><p className="muted">{error}</p><Link className="text-link" to="/retreats">Browse retreats</Link></section>; if (!retreat) return <div className="loading">Loading retreat…</div>; return <section className="detail page section"><Link className="text-link" to="/retreats">← All retreats</Link><div className="detail-grid"><div className="retreat-gallery">{retreat.images?.length ? retreat.images.map(image => <img key={image.id} src={image.url} alt={image.alt_text} loading="lazy"/>) : <div className="poster large"><span>RETUNORI<br/><b>{retreat.title}</b></span></div>}</div><div><div className="eyebrow">{retreat.sales_open ? 'REGISTRATION OPEN' : 'COMING SOON'}</div><h1>{retreat.title}</h1><p className="lead">{retreat.description}</p><div className="facts"><span><CalendarDays/> {new Date(retreat.starts_at).toLocaleDateString('en-GB', {day:'numeric',month:'long',year:'numeric'})}</span><span><MapPin/> {retreat.venue}</span><span><Ticket/> KES {retreat.price_kes.toLocaleString()}</span></div><Link to={`/purchase?retreat=${retreat.id}`} className="button primary">Get your ticket <ArrowRight size={17}/></Link></div></div></section> }
 function Login({ register = false }) { const navigate = useNavigate(); const [error, setError] = useState(''); const [form, setForm] = useState({ full_name:'', email:'', phone:'', course_of_study:'', password:'' }); const submit = async e => { e.preventDefault(); try { const r = await api.post(register ? '/auth/register' : '/auth/login', form); localStorage.setItem('retunori_token', r.data.access_token); localStorage.setItem('retunori_user', JSON.stringify(r.data.user)); navigate('/dashboard') } catch (e) { setError(e.response?.data?.detail || 'Something went wrong. Please try again.') } }; return <section className="auth page"><div className="auth-card"><div className="eyebrow">{register ? 'JOIN RETUNORI' : 'WELCOME BACK'}</div><h1>{register ? 'Begin your next chapter.' : 'Good to see you.'}</h1><p className="muted">{register ? 'Create an account to reserve your place.' : 'Sign in to access your retreats and tickets.'}</p><form onSubmit={submit}>{register && <input placeholder="Full name" required onChange={e=>setForm({...form,full_name:e.target.value})}/>}<input type="email" placeholder="Email address" required onChange={e=>setForm({...form,email:e.target.value})}/>{register && <><input placeholder="Phone number" required onChange={e=>setForm({...form,phone:e.target.value})}/><input placeholder="Course of study" required onChange={e=>setForm({...form,course_of_study:e.target.value})}/></>}<input type="password" placeholder="Password" required minLength="8" onChange={e=>setForm({...form,password:e.target.value})}/>{error && <div className="error">{error}</div>}<button className="button primary" type="submit">{register ? 'Create account' : 'Sign in'} <ArrowRight size={17}/></button></form>{!register && <p className="switch"><Link to="/reset-password">Forgot your password?</Link></p>}<p className="switch">{register ? 'Already have an account?' : 'New to RETUNORI?'} <Link to={register ? '/login' : '/register'}>{register ? 'Sign in' : 'Create an account'}</Link></p></div></section> }
 function AboutPage() {
   return <>
