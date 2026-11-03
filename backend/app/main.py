@@ -147,6 +147,17 @@ def startup():
     try:
         for retreat_image in db.scalars(select(RetreatImage)).all():
             if retreat_image.url:
+                relative_path = retreat_image.url.removeprefix("/media/")
+                if not (MEDIA_ROOT / relative_path).is_file():
+                    db.delete(retreat_image)
+        db.commit()
+    finally:
+        db.close()
+
+    db = SessionLocal()
+    try:
+        for retreat_image in db.scalars(select(RetreatImage)).all():
+            if retreat_image.url:
                 path = Path(retreat_image.url.removeprefix("/media/"))
                 if path.suffix.lower() in {".jpg", ".jpeg", ".png"}:
                     retreat_image.url = f"{path.with_suffix('.webp').as_posix()}"
