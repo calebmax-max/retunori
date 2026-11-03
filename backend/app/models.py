@@ -114,7 +114,7 @@ class Payment(Base):
     paid_amount: Mapped[int | None] = mapped_column(Integer, nullable=True)
     phone_number: Mapped[str] = mapped_column(String(40))
     transaction_reference: Mapped[str] = mapped_column(String(120), unique=True, index=True)
-    mpesa_receipt: Mapped[str | None] = mapped_column(String(120), nullable=True)
+    mpesa_receipt: Mapped[str | None] = mapped_column(String(120), nullable=True, unique=True)
     status: Mapped[str] = mapped_column(String(30), default="pending", index=True)
     error_detail: Mapped[str | None] = mapped_column(Text, nullable=True)
     requested_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow)

@@ -40,7 +40,7 @@ uvicorn app.main:app --reload --port 8000
 
 The API defaults to a local SQLite database. Set `DATABASE_URL` in `.env` to a PostgreSQL connection string for deployment.
 
-Run `alembic upgrade head` after changing `DATABASE_URL` or deploying new migrations. The current migration head is `0008_ticket_receipt_snapshot`.
+Run `alembic upgrade head` after changing `DATABASE_URL` or deploying new migrations. The current migration head is `0010_unique_mpesa_receipts`.
 
 Create the first administrator from the backend directory after configuring the database:
 
@@ -72,6 +72,6 @@ npm run build
 
 The backend tests use an isolated per-run SQLite file under the system temporary directory, so verification does not modify the local development database.
 
-Before production, configure a strong `JWT_SECRET`, PostgreSQL, HTTPS/CORS, SMTP values (`SMTP_HOST`, `SMTP_USERNAME`, `SMTP_PASSWORD`, `SMTP_FROM_EMAIL`) for password-reset delivery, and Daraja Sandbox credentials. Do not place any of these values in frontend code. Local retreat media is stored under `backend/media`; use private object storage for production deployments.
+Before production, configure a strong `JWT_SECRET`, set `APP_ENV=production`, PostgreSQL, HTTPS/CORS, SMTP values (`SMTP_HOST`, `SMTP_USERNAME`, `SMTP_PASSWORD`, `SMTP_FROM_EMAIL`) for password-reset delivery, and Daraja Sandbox credentials. Render runs `alembic upgrade head` before starting the API. Automatic local SQLite backups are disabled in production; configure managed PostgreSQL backups and private object storage instead. Do not place any of these values in frontend code.
 
 # retunori

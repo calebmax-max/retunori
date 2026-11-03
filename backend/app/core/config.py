@@ -4,6 +4,8 @@ from pydantic_settings import BaseSettings, SettingsConfigDict
 
 class Settings(BaseSettings):
     app_name: str = "RETUNORI API"
+    app_env: str = "development"
+    automatic_backups_enabled: bool = True
     database_url: str = "sqlite:///./retunori.db"
     jwt_secret: str = "development-only-change-me-please-use-a-long-random-secret"
     jwt_expire_minutes: int = 1440

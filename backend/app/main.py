@@ -30,9 +30,9 @@ from .services.tickets import ticket_pdf
 # RETUNORI stores event and sales windows as East Africa Time wall-clock values.
 EAT_OFFSET = timedelta(hours=3)
 def site_now(): return datetime.utcnow() + EAT_OFFSET
-from .services.daraja import DarajaNotConfigured, initiate_stk
+from .services.daraja import DarajaNotConfigured, DarajaResponseError, initiate_stk
 from .services.reports import report_pdf, report_xlsx
-from .services.email import EmailNotConfigured, send_password_reset_email
+from .services.email import EmailDeliveryError, EmailNotConfigured, send_password_reset_email
 from slowapi import Limiter, _rate_limit_exceeded_handler
 from slowapi.errors import RateLimitExceeded
 from slowapi.util import get_remote_address
@@ -120,6 +120,8 @@ def wake_announcement_expiry_loop():
 
 @app.on_event("startup")
 def startup():
+    if settings.app_env.lower() == "production" and settings.jwt_secret == "development-only-change-me-please-use-a-long-random-secret":
+        raise RuntimeError("JWT_SECRET must be configured in production")
     Base.metadata.create_all(bind=engine)
     if engine.dialect.name == "sqlite":
         with engine.begin() as connection:
@@ -211,7 +213,7 @@ async def _automatic_backup_loop():
             monitor_db.commit()
         finally:
             monitor_db.close()
-        if engine.url.get_backend_name() != "sqlite": continue
+        if not settings.automatic_backups_enabled or engine.url.get_backend_name() != "sqlite": continue
         db = SessionLocal()
         try:
             latest = db.scalar(select(Backup).order_by(Backup.created_at.desc()))
@@ -266,18 +268,23 @@ def password_reset_request(request: Request, payload: PasswordResetRequest, db: 
     user = db.scalar(select(User).where(User.email == payload.email.lower()))
     if user:
         raw = secrets.token_urlsafe(32); digest = hashlib.sha256(raw.encode()).hexdigest()
-        db.add(PasswordResetToken(user_id=user.id, token_hash=digest, expires_at=datetime.utcnow() + timedelta(minutes=30))); db.commit()
+        reset_token = PasswordResetToken(user_id=user.id, token_hash=digest, expires_at=datetime.utcnow() + timedelta(minutes=30))
+        db.add(reset_token)
+        db.flush()
         reset_url = f"{settings.frontend_origin.rstrip('/')}/reset-password?token={raw}"
         try:
             send_password_reset_email(recipient=user.email, reset_url=reset_url)
-        except EmailNotConfigured:
+            db.commit()
+        except (EmailNotConfigured, EmailDeliveryError):
+            db.rollback()
             # Keep account-existence responses indistinguishable; configure SMTP before production use.
             pass
     return {"message": "If an account exists for that email, reset instructions will be sent."}
 
 
 @app.post("/api/auth/password-reset/confirm")
-def password_reset_confirm(payload: PasswordResetConfirm, db: Session = Depends(get_db)):
+@limiter.limit("5/minute")
+def password_reset_confirm(request: Request, payload: PasswordResetConfirm, db: Session = Depends(get_db)):
     digest = hashlib.sha256(payload.token.encode()).hexdigest(); item = db.scalar(select(PasswordResetToken).where(PasswordResetToken.token_hash == digest, PasswordResetToken.used_at.is_(None)))
     if not item or item.expires_at <= datetime.utcnow(): raise HTTPException(400, "This reset link is invalid or expired")
     user = db.get(User, item.user_id)
@@ -703,6 +710,7 @@ def reset_staff_password(staff_id: int, payload: PasswordUpdate, user: User = De
     staff = db.get(User, staff_id)
     if not staff or staff.role != Role.staff: raise HTTPException(404, "Staff account not found")
     staff.password_hash = hash_password(payload.password)
+    db.query(Session).filter(Session.user_id == staff.id, Session.revoked_at.is_(None)).update({Session.revoked_at: datetime.utcnow()})
     db.add(ActivityLog(user_id=user.id, action="staff.password_reset", record_type="user", record_id=str(staff_id))); db.commit()
     return {"status": "password_updated"}
 
@@ -991,13 +999,17 @@ def register_for_retreat(payload: RegistrationCreate, user: User = Depends(requi
         payment.transaction_reference = response.get("CheckoutRequestID", payment.transaction_reference); db.commit()
         return {"registration_id": registration.id, "payment_id": payment.id, "status": "pending", "provider": "daraja", "message": "STK Push sent. Complete payment on your phone; your ticket is issued only after callback verification."}
     except DarajaNotConfigured:
-        db.delete(payment)
-        db.delete(registration)
+        payment.status = "failed"
+        payment.error_detail = "Daraja is not configured on this environment"
+        registration.status = "failed"
+        db.add(Notification(kind="payment.failed", title="Payment could not be started", body=f"Payment setup is unavailable for {retreat.title}."))
         db.commit()
         raise HTTPException(503, "Daraja is not configured on this environment")
-    except httpx.HTTPError as error:
-        db.delete(payment)
-        db.delete(registration)
+    except (httpx.HTTPError, DarajaResponseError):
+        payment.status = "failed"
+        payment.error_detail = "Daraja could not start the payment request"
+        registration.status = "failed"
+        db.add(Notification(kind="payment.failed", title="Payment could not be started", body=f"Daraja could not start payment for {retreat.title}."))
         db.commit()
         raise HTTPException(502, "Daraja could not be reached")
 
@@ -1013,7 +1025,7 @@ def initiate_payment(payment_id: int, user: User = Depends(require_roles(Role.at
             payment.transaction_reference = response.get("CheckoutRequestID", payment.transaction_reference); db.commit()
             return {"status": "pending", "provider": "daraja", "checkout_request_id": payment.transaction_reference}
         except DarajaNotConfigured: raise HTTPException(503, "Daraja is not configured")
-        except httpx.HTTPError: raise HTTPException(502, "Daraja could not be reached")
+        except (httpx.HTTPError, DarajaResponseError): raise HTTPException(502, "Daraja could not be reached")
     raise HTTPException(409, "This payment has already been resolved or is awaiting callback")
 
 
@@ -1041,8 +1053,18 @@ def daraja_callback(request: Request, payload: dict, callback_secret: str = Quer
     else:
         normalized = payload
     checkout_reference = normalized.get("checkout_reference")
-    result_code = normalized.get("result_code")
+    try:
+        result_code = int(normalized.get("result_code"))
+    except (TypeError, ValueError):
+        raise HTTPException(422, "Callback result code is invalid")
     result_description = normalized.get("result_description")
+    amount = normalized.get("amount")
+    try:
+        amount = int(amount) if amount is not None else None
+    except (TypeError, ValueError):
+        amount = None
+    receipt = normalized.get("mpesa_receipt")
+    receipt = str(receipt).strip() if receipt is not None else None
     payment = db.scalar(select(Payment).where(Payment.transaction_reference == checkout_reference).with_for_update())
     db.add(PaymentCallback(payment_id=payment.id if payment else None, checkout_reference=checkout_reference or "unknown", result_code=result_code if result_code is not None else -1, raw_payload=json.dumps(payload)))
     if not payment: db.commit(); return {"accepted": True}
@@ -1061,9 +1083,15 @@ def daraja_callback(request: Request, payload: dict, callback_secret: str = Quer
         registration = db.get(Registration, payment.registration_id)
         if registration: registration.status = "failed"
         db.add(Notification(kind="payment.failed", title="Payment failed", body=f"A payment attempt for payment {payment.id} failed.")); db.commit(); return {"accepted": True, "status": "failed"}
-    if normalized.get("amount") != payment.expected_amount or not normalized.get("mpesa_receipt"):
+    receipt_owner = db.scalar(select(Payment).where(Payment.mpesa_receipt == receipt, Payment.id != payment.id)) if receipt else None
+    if receipt_owner:
+        payment.status = "pending"
+        payment.error_detail = "M-Pesa receipt has already been used"
+        db.commit()
+        raise HTTPException(422, "Callback receipt has already been used")
+    if amount != payment.expected_amount or not receipt:
         payment.status = "pending"; payment.error_detail = "Callback failed amount or receipt validation"; db.commit(); raise HTTPException(422, "Callback could not be verified")
-    payment.status = "successful"; payment.paid_amount = normalized["amount"]; payment.mpesa_receipt = normalized["mpesa_receipt"]
+    payment.status = "successful"; payment.paid_amount = amount; payment.mpesa_receipt = receipt
     registration = db.get(Registration, payment.registration_id); retreat = db.get(Retreat, payment.retreat_id); profile = db.scalar(select(AttendeeProfile).where(AttendeeProfile.user_id == payment.attendee_id))
     ticket = db.scalar(select(Ticket).where(Ticket.registration_id == registration.id))
     if not ticket:

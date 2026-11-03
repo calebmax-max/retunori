@@ -7,7 +7,7 @@ const api = axios.create({ baseURL: '/api' })
 api.interceptors.request.use(config => { const token = localStorage.getItem("retunori_token"); if (token) config.headers.Authorization = "Bearer " + token; return config })
 
 export default function PurchaseFlow() {
-  const navigate = useNavigate(); const [params] = useSearchParams(); const [retreats, setRetreats] = useState([]); const [courses, setCourses] = useState([]); const [form, setForm] = useState({ retreat_id: params.get('retreat') || '', course_of_study: '', mpesa_phone: '' }); const [paymentId, setPaymentId] = useState(null); const [paymentState, setPaymentState] = useState('idle'); const [status, setStatus] = useState('')
+  const navigate = useNavigate(); const [params] = useSearchParams(); const [retreats, setRetreats] = useState([]); const [courses, setCourses] = useState([]); const [form, setForm] = useState({ retreat_id: params.get('retreat') || '', course_of_study: '', mpesa_phone: '' }); const [paymentId, setPaymentId] = useState(() => sessionStorage.getItem('retunori_payment_id')); const [paymentState, setPaymentState] = useState('idle'); const [status, setStatus] = useState('')
   const user = (() => {
     try { return JSON.parse(localStorage.getItem('retunori_user') || 'null') } catch { return null }
   })()
@@ -26,11 +26,13 @@ export default function PurchaseFlow() {
         const response = await api.get(`/payments/${paymentId}`)
         if (response.data.status === 'successful') {
           window.clearInterval(timer)
+          sessionStorage.removeItem('retunori_payment_id')
           setPaymentState('successful')
           setStatus('Payment verified. Your ticket is ready.')
           window.setTimeout(() => navigate('/dashboard'), 1400)
         } else if (response.data.status === 'failed') {
           window.clearInterval(timer)
+          sessionStorage.removeItem('retunori_payment_id')
           setPaymentState('failed')
           setStatus(response.data.error_detail || 'Payment failed. Please try again.')
         } else if (Date.now() - startedAt >= 10 * 60 * 1000) {
@@ -60,7 +62,7 @@ export default function PurchaseFlow() {
     try {
       const response = await api.post('/registrations', { ...form, retreat_id: Number(form.retreat_id), mpesa_phone: selectedRetreat?.is_free ? null : form.mpesa_phone })
       if (response.data.provider === 'free') { setStatus(response.data.message); window.setTimeout(() => navigate('/dashboard'), 700) }
-      else { setPaymentId(response.data.payment_id); setStatus(response.data.message || 'Complete the M-Pesa prompt on your phone.') }
+      else { sessionStorage.setItem('retunori_payment_id', String(response.data.payment_id)); setPaymentId(response.data.payment_id); setStatus(response.data.message || 'Complete the M-Pesa prompt on your phone.') }
     } catch (e) {
       if (e.response?.status === 403) setStatus('Registration is available only to attendee accounts. Sign out and sign in with an attendee account.')
       else setStatus(e.response?.data?.detail || 'Registration could not be completed.')
@@ -95,7 +97,7 @@ export default function PurchaseFlow() {
           <p>{status}</p>
           {!paymentComplete && !paymentFailed && <div className="payment-phone"><Smartphone size={18}/><span>{form.mpesa_phone}</span><span className="pulse-dot"/></div>}
           {selectedRetreat && <div className="payment-summary"><span>{selectedRetreat.title}</span><strong>KES {selectedRetreat.price_kes.toLocaleString()}</strong></div>}
-          {paymentFailed && <button type="button" className="button secondary" onClick={() => { setPaymentId(null); setPaymentState('idle'); setStatus('') }}>Try another payment</button>}
+          {paymentFailed && <button type="button" className="button secondary" onClick={() => { sessionStorage.removeItem('retunori_payment_id'); setPaymentId(null); setPaymentState('idle'); setStatus('') }}>Try another payment</button>}
           <div className="payment-security"><ShieldCheck size={15}/> Securely verified through Safaricom Daraja</div>
         </div>}
       </div>

@@ -21,6 +21,21 @@ export default function AdminDashboard() {
     window.dispatchEvent(new Event('retunori-auth-changed'))
     navigate('/login')
   }
+  const downloadReport = async format => {
+    try {
+      const response = await api.get(`/admin/reports/export.${format}`, { responseType: 'blob' })
+      const url = window.URL.createObjectURL(response.data)
+      const link = document.createElement('a')
+      link.href = url
+      link.download = `retunori-report.${format}`
+      document.body.appendChild(link)
+      link.click()
+      link.remove()
+      window.URL.revokeObjectURL(url)
+    } catch {
+      setError('The report could not be downloaded.')
+    }
+  }
   return <main className="admin-shell">
     <aside className="admin-sidebar">
       <Link to="/" className="admin-brand"><span className="brand-mark">R</span><span>RETUNORI</span></Link>
@@ -38,12 +53,12 @@ export default function AdminDashboard() {
         <div className="admin-page-heading"><div><div className="eyebrow">ADMINISTRATION</div><h1>Good morning.</h1><p>Here is what is happening across RETUNORI.</p></div><Link className="button primary" to="/admin/manage">Create retreat</Link></div>
         {error && <p className="error admin-error">{error}</p>}
         <form className="admin-filter" onSubmit={e => { e.preventDefault(); load() }}><span>Reporting period</span><input aria-label="Start date" type="datetime-local" value={dates.start} onChange={e => setDates({ ...dates, start: e.target.value })}/><input aria-label="End date" type="datetime-local" value={dates.end} onChange={e => setDates({ ...dates, end: e.target.value })}/><button className="button secondary">Apply</button></form>
-        <div className="admin-metrics">{[['Revenue', `KES ${Number(overview.revenue_kes || 0).toLocaleString()}`, '+12.8%'], ['Registrations', overview.registrations, 'New bookings'], ['Paid attendees', overview.paid_attendees, 'Confirmed'], ['Remaining capacity', overview.remaining_capacity, 'Across events']].map(([label, value, note]) => <div className="admin-metric" key={label}><span>{label}</span><strong>{value ?? '—'}</strong><small>{note}</small></div>)}</div>
+        <div className="admin-metrics">{[['Revenue', `KES ${Number(overview.revenue_kes || 0).toLocaleString()}`, 'Recorded revenue'], ['Registrations', overview.registrations, 'New bookings'], ['Paid attendees', overview.paid_attendees, 'Confirmed'], ['Remaining capacity', overview.remaining_capacity, 'Across events']].map(([label, value, note]) => <div className="admin-metric" key={label}><span>{label}</span><strong>{value ?? '—'}</strong><small>{note}</small></div>)}</div>
         <div className="admin-panels">
           <div className="admin-panel capacity-panel"><div className="admin-panel-head"><div><span>EVENT PERFORMANCE</span><h2>Capacity</h2></div><Link className="icon-link" to="/admin/retreats">View all</Link></div>{rows.map(row => <div className="capacity-row" key={row.id}><div><strong>{row.title}</strong><span>{row.tickets_sold} sold · {row.remaining} remaining</span></div><div className="capacity-track"><i style={{ width: `${row.capacity ? Math.min(100, (row.tickets_sold / row.capacity) * 100) : 0}%` }}/></div><b>{row.capacity}</b></div>)}</div>
           <div className="admin-panel"><div className="admin-panel-head"><div><span>ATTENDANCE</span><h2>Course mix</h2></div></div>{courses.map(row => <div className="course-row" key={row.course}><span>{row.course}</span><strong>{row.attendees}</strong></div>)}</div>
         </div>
-        <div className="admin-actions"><span>Exports</span><a href="/api/admin/reports/export.xlsx"><Download size={16}/> Excel report</a><a href="/api/admin/reports/export.pdf"><Download size={16}/> PDF report</a></div>
+        <div className="admin-actions"><span>Exports</span><button type="button" onClick={() => downloadReport('xlsx')}><Download size={16}/> Excel report</button><button type="button" onClick={() => downloadReport('pdf')}><Download size={16}/> PDF report</button></div>
       </div>
     </section>
   </main>
