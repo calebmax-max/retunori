@@ -3,6 +3,7 @@ import sys
 from pathlib import Path
 
 from sqlalchemy import MetaData, create_engine, inspect, text
+from sqlalchemy.dialects.postgresql import insert as postgres_insert
 from sqlalchemy.engine import make_url
 from sqlalchemy.orm import Session
 
@@ -17,6 +18,8 @@ from app import models  # noqa: E402,F401
 def normalized_url(url: str) -> str:
     if url.startswith("postgres://"):
         return url.replace("postgres://", "postgresql://", 1)
+    if url.startswith("postgresql://"):
+        return url.replace("postgresql://", "postgresql+psycopg://", 1)
     return url
 
 
@@ -44,16 +47,24 @@ def copy_database(source_url: str, target_url: str) -> None:
     source_metadata.reflect(bind=source)
 
     with Session(source) as source_session, Session(target) as target_session:
-        target_session.execute(text("SET session_replication_role = 'replica'"))
-        try:
-            for table_name in table_names:
-                table = target_metadata.tables[table_name]
-                source_table = source_metadata.tables[table_name]
-                rows = source_session.execute(source_table.select()).mappings().all()
-                if rows:
-                    target_session.execute(table.insert(), rows)
-        finally:
-            target_session.execute(text("SET session_replication_role = 'origin'"))
+        priority_tables = ["retreats", "users"]
+        tables_to_copy = [source_metadata.tables[name] for name in priority_tables if name in source_metadata.tables]
+        tables_to_copy.extend(
+            table for table in source_metadata.sorted_tables if table.name not in priority_tables
+        )
+        for table in tables_to_copy:
+            if table.name not in target_metadata.tables or not table.primary_key.columns:
+                continue
+            rows = source_session.execute(table.select()).mappings().all()
+            if not rows:
+                continue
+            rows = [dict(row) for row in rows]
+            target_table = target_metadata.tables[table.name]
+            statement = postgres_insert(target_table).values(rows)
+            statement = statement.on_conflict_do_nothing(
+                index_elements=list(target_table.primary_key.columns)
+            )
+            target_session.execute(statement)
 
         target_session.commit()
 
