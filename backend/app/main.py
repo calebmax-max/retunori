@@ -232,6 +232,11 @@ async def _automatic_backup_loop():
 def health():
     return {"status": "ok", "service": "retunori-api"}
 
+
+@app.head("/api/health", include_in_schema=False)
+def health_head():
+    return Response(status_code=200)
+
 @app.post("/api/auth/register", response_model=AuthResponse, status_code=201)
 @limiter.limit("20/minute")
 def register(request: Request, payload: RegisterRequest, db: Session = Depends(get_db)):
