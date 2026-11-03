@@ -50,7 +50,7 @@ export default function PurchaseFlow() {
       }
     }
     checkPayment()
-    const timer = window.setInterval(checkPayment, 10000)
+    const timer = window.setInterval(checkPayment, 2000)
     return () => window.clearInterval(timer)
   }, [paymentId, navigate])
   const selectedRetreat = retreats.find(retreat => String(retreat.id) === String(form.retreat_id))

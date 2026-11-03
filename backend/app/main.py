@@ -200,16 +200,19 @@ async def shutdown():
 
 async def _automatic_backup_loop():
     while True:
-        await asyncio.sleep(60 * 60)
+        await asyncio.sleep(30)
         monitor_db = SessionLocal()
         try:
-            cutoff = datetime.utcnow() - timedelta(minutes=15)
+            cutoff = datetime.utcnow() - timedelta(minutes=5)
             delayed = monitor_db.scalars(select(Payment).where(Payment.status == "pending", Payment.requested_at <= cutoff)).all()
             for payment in delayed:
-                marker = f"payment {payment.id}"
-                already_notified = monitor_db.scalar(select(Notification).where(Notification.kind == "payment.delayed", Notification.body.contains(marker)))
-                if not already_notified:
-                    monitor_db.add(Notification(kind="payment.delayed", title="Delayed payment", body=f"Pending payment {payment.id} has not received a verified callback yet."))
+                payment.status = "failed"
+                payment.callback_at = datetime.utcnow()
+                payment.error_detail = "Payment request expired after 5 minutes. Please try again."
+                registration = monitor_db.get(Registration, payment.registration_id)
+                if registration and registration.status == "pending":
+                    registration.status = "failed"
+                monitor_db.add(Notification(kind="payment.expired", title="Payment request expired", body=f"Payment {payment.id} expired without a Daraja callback."))
             monitor_db.commit()
         finally:
             monitor_db.close()
@@ -1074,6 +1077,9 @@ def daraja_callback(request: Request, payload: dict, callback_secret: str = Quer
     db.add(PaymentCallback(payment_id=payment.id if payment else None, checkout_reference=checkout_reference or "unknown", result_code=result_code if result_code is not None else -1, raw_payload=json.dumps(payload)))
     if not payment: db.commit(); return {"accepted": True}
     if payment.status == "successful": db.commit(); return {"accepted": True, "duplicate": True}
+    if payment.status == "failed":
+        db.commit()
+        return {"accepted": True, "status": "failed", "late_callback": True}
     payment.callback_at = datetime.utcnow()
     if result_code != 0:
         descriptions = {
