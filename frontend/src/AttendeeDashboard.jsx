@@ -1,6 +1,7 @@
 import React, { useEffect, useState } from 'react'
 import axios from 'axios'
-import { CheckCircle2, Download, Save, Ticket } from 'lucide-react'
+import { Link } from 'react-router-dom'
+import { ArrowLeft, CheckCircle2, Download, Save, Ticket } from 'lucide-react'
 import './portal.css'
 
 const api = axios.create({ baseURL: '/api' })
@@ -41,6 +42,7 @@ export function AttendeeDashboard() {
   }
 
   return <section className="page section portal">
+    <Link className="back-link" to="/"><ArrowLeft size={16}/> Back to home</Link>
     <div className="eyebrow">YOUR RETUNORI</div>
     <h1>Your retreat space.</h1>
     {error && <p className="error">{error}</p>}
@@ -97,6 +99,7 @@ export function AccountPage() {
   }
 
   return <section className="page section manage">
+    <Link className="back-link" to="/dashboard"><ArrowLeft size={16}/> Back to dashboard</Link>
     <div className="eyebrow">YOUR ACCOUNT</div>
     <h1>Keep your details current.</h1>
     <form className="dash-card manage-form account-form" onSubmit={submit}>

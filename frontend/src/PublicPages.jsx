@@ -1,6 +1,7 @@
 import React, { useEffect, useState } from 'react'
 import axios from 'axios'
-import { ArrowRight, Mail } from 'lucide-react'
+import { Link } from 'react-router-dom'
+import { ArrowLeft, ArrowRight, Mail } from 'lucide-react'
 
 const api = axios.create({ baseURL: '/api' })
 
@@ -65,12 +66,12 @@ export function ContactPage() {
   useEffect(() => { api.get('/homepage').then(response => setSupport(response.data.content || support)).catch(() => {}) }, [])
   const submit = async event => { event.preventDefault(); setStatus(''); try { await api.post('/contact', form); setStatus('Thanks. Your message has been received.'); setForm({name:'',email:'',message:''}) } catch { setStatus('We could not send that message. Please try again.') } }
   const whatsapp = support.support_phone ? `https://wa.me/${support.support_phone.replace(/\D/g, '').replace(/^0/, '254')}` : ''
-  return <section className="page section"><div className="eyebrow"><Mail size={14}/> SUPPORT</div><h1>Get in touch.</h1><p className="lead">Have a question about a retreat? Send a message to the RETUNORI team.</p><div className="support-links"><a className="text-link" href={`mailto:${support.support_email}`}>{support.support_email}</a>{support.support_phone && <a className="text-link" href={`tel:${support.support_phone}`}>{support.support_phone}</a>}{whatsapp && <a className="text-link" href={whatsapp} target="_blank" rel="noreferrer">WhatsApp support</a>}</div><form className="contact-form" onSubmit={submit}><input required placeholder="Your name" value={form.name} onChange={e=>setForm({...form,name:e.target.value})}/><input required type="email" placeholder="Email address" value={form.email} onChange={e=>setForm({...form,email:e.target.value})}/><textarea required placeholder="How can we help?" value={form.message} onChange={e=>setForm({...form,message:e.target.value})}/><button className="button primary" type="submit">Send message <ArrowRight size={16}/></button>{status && <p className="muted">{status}</p>}</form></section>
+  return <section className="page section"><Link className="back-link" to="/"><ArrowLeft size={16}/> Back to home</Link><div className="eyebrow"><Mail size={14}/> SUPPORT</div><h1>Get in touch.</h1><p className="lead">Have a question about a retreat? Send a message to the RETUNORI team.</p><div className="support-links"><a className="text-link" href={`mailto:${support.support_email}`}>{support.support_email}</a>{support.support_phone && <a className="text-link" href={`tel:${support.support_phone}`}>{support.support_phone}</a>}{whatsapp && <a className="text-link" href={whatsapp} target="_blank" rel="noreferrer">WhatsApp support</a>}</div><form className="contact-form" onSubmit={submit}><input required placeholder="Your name" value={form.name} onChange={e=>setForm({...form,name:e.target.value})}/><input required type="email" placeholder="Email address" value={form.email} onChange={e=>setForm({...form,email:e.target.value})}/><textarea required placeholder="How can we help?" value={form.message} onChange={e=>setForm({...form,message:e.target.value})}/><button className="button primary" type="submit">Send message <ArrowRight size={16}/></button>{status && <p className="muted">{status}</p>}</form></section>
 }
 
 export function LegalPage({ slug }) {
   const [page, setPage] = useState(null); useEffect(() => { api.get(`/legal/${slug}`).then(r=>setPage(r.data)).catch(()=>setPage(false)) }, [slug])
   if (page === null) return <div className="loading">Loading…</div>
   if (page === false) return <section className="page section"><h1>Page unavailable.</h1><p className="lead">This legal page has not been published yet.</p></section>
-  return <section className="page section legal"><div className="eyebrow">RETUNORI POLICY</div><h1>{page.title}</h1><div className="legal-copy">{page.body}</div></section>
+  return <section className="page section legal"><Link className="back-link" to="/"><ArrowLeft size={16}/> Back to home</Link><div className="eyebrow">RETUNORI POLICY</div><h1>{page.title}</h1><div className="legal-copy">{page.body}</div></section>
 }
