@@ -950,10 +950,13 @@ def register_for_retreat(payload: RegistrationCreate, user: User = Depends(requi
     now = site_now()
     if retreat.sales_opens_at and now < retreat.sales_opens_at: raise HTTPException(400, "Ticket sales have not opened yet")
     if retreat.sales_closes_at and now > retreat.sales_closes_at: raise HTTPException(400, "Ticket sales have closed")
-    if db.scalar(select(Registration).where(Registration.attendee_id == user.id, Registration.retreat_id == retreat.id)): raise HTTPException(409, "You already registered for this retreat")
+    existing_registration = db.scalar(select(Registration).where(Registration.attendee_id == user.id, Registration.retreat_id == retreat.id))
+    if existing_registration and existing_registration.status != "failed": raise HTTPException(409, "You already registered for this retreat")
     reserved = db.scalar(select(func.count(Registration.id)).where(Registration.retreat_id == retreat.id, Registration.status.in_(["pending", "paid"]))) or 0
     if reserved >= retreat.capacity: raise HTTPException(409, "This retreat is sold out")
-    registration = Registration(attendee_id=user.id, retreat_id=retreat.id, course_snapshot=payload.course_of_study)
+    registration = existing_registration or Registration(attendee_id=user.id, retreat_id=retreat.id, course_snapshot=payload.course_of_study)
+    registration.course_snapshot = payload.course_of_study
+    registration.status = "pending"
     db.add(registration); db.flush()
     if retreat.is_free or retreat.price_kes == 0:
         profile = db.scalar(select(AttendeeProfile).where(AttendeeProfile.user_id == user.id))
@@ -967,7 +970,21 @@ def register_for_retreat(payload: RegistrationCreate, user: User = Depends(requi
         return {"registration_id": registration.id, "ticket_number": ticket.ticket_number, "status": "confirmed", "provider": "free", "message": "Registration confirmed. Your QR ticket is ready."}
     if not payload.mpesa_phone:
         raise HTTPException(422, "An M-Pesa phone number is required for paid events")
-    payment = Payment(registration_id=registration.id, attendee_id=user.id, retreat_id=retreat.id, expected_amount=retreat.price_kes, phone_number=payload.mpesa_phone, transaction_reference=f"RET-{secrets.token_hex(8).upper()}")
+    old_payment = db.scalar(select(Payment).where(Payment.registration_id == registration.id).order_by(Payment.id.desc()))
+    if old_payment:
+        payment = old_payment
+        payment.attendee_id = user.id
+        payment.retreat_id = retreat.id
+        payment.expected_amount = retreat.price_kes
+        payment.phone_number = payload.mpesa_phone
+        payment.paid_amount = None
+        payment.mpesa_receipt = None
+        payment.status = "pending"
+        payment.callback_at = None
+        payment.error_detail = None
+        payment.transaction_reference = f"RET-{secrets.token_hex(8).upper()}"
+    else:
+        payment = Payment(registration_id=registration.id, attendee_id=user.id, retreat_id=retreat.id, expected_amount=retreat.price_kes, phone_number=payload.mpesa_phone, transaction_reference=f"RET-{secrets.token_hex(8).upper()}")
     db.add(payment); db.add(Notification(kind="registration.created", title="New registration", body=f"A new registration was created for {retreat.title}.")); db.add(Notification(kind="payment.pending", title="Payment awaiting verification", body=f"A payment request was created for {retreat.title}.")); db.commit(); db.refresh(payment)
     try:
         response = initiate_stk(phone_number=payload.mpesa_phone, amount=retreat.price_kes, account_reference=payment.transaction_reference, description=f"RETUNORI {retreat.title}")
@@ -1020,18 +1037,28 @@ def daraja_callback(request: Request, payload: dict, callback_secret: str = Quer
     callback = payload.get("Body", {}).get("stkCallback", {})
     if callback:
         metadata = {item.get("Name"): item.get("Value") for item in callback.get("CallbackMetadata", {}).get("Item", [])}
-        normalized = {"checkout_reference": callback.get("CheckoutRequestID"), "result_code": callback.get("ResultCode"), "mpesa_receipt": metadata.get("MpesaReceiptNumber"), "amount": metadata.get("Amount")}
+        normalized = {"checkout_reference": callback.get("CheckoutRequestID"), "result_code": callback.get("ResultCode"), "result_description": callback.get("ResultDesc"), "mpesa_receipt": metadata.get("MpesaReceiptNumber"), "amount": metadata.get("Amount")}
     else:
         normalized = payload
     checkout_reference = normalized.get("checkout_reference")
     result_code = normalized.get("result_code")
+    result_description = normalized.get("result_description")
     payment = db.scalar(select(Payment).where(Payment.transaction_reference == checkout_reference).with_for_update())
     db.add(PaymentCallback(payment_id=payment.id if payment else None, checkout_reference=checkout_reference or "unknown", result_code=result_code if result_code is not None else -1, raw_payload=json.dumps(payload)))
     if not payment: db.commit(); return {"accepted": True}
     if payment.status == "successful": db.commit(); return {"accepted": True, "duplicate": True}
     payment.callback_at = datetime.utcnow()
     if result_code != 0:
-        payment.status = "failed"; payment.error_detail = "Daraja reported a failed transaction"; registration = db.get(Registration, payment.registration_id); 
+        descriptions = {
+            1032: "Payment cancelled. You can try again.",
+            1037: "The M-Pesa prompt timed out. Please try again.",
+            2001: "Incorrect M-Pesa PIN. Please try again.",
+            1: "Payment failed. Please try again.",
+            1019: "The M-Pesa request expired. Please try again.",
+        }
+        payment.status = "failed"
+        payment.error_detail = descriptions.get(int(result_code), result_description or "Payment failed. Please try again.")
+        registration = db.get(Registration, payment.registration_id)
         if registration: registration.status = "failed"
         db.add(Notification(kind="payment.failed", title="Payment failed", body=f"A payment attempt for payment {payment.id} failed.")); db.commit(); return {"accepted": True, "status": "failed"}
     if normalized.get("amount") != payment.expected_amount or not normalized.get("mpesa_receipt"):
