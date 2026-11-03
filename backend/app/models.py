@@ -1,5 +1,6 @@
 from datetime import datetime
 from enum import Enum
+from typing import Optional
 from sqlalchemy import Boolean, DateTime, Enum as SqlEnum, ForeignKey, Integer, String, Text, UniqueConstraint, Index
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 from .db import Base
@@ -26,7 +27,7 @@ class User(Base):
     role: Mapped[Role] = mapped_column(SqlEnum(Role), default=Role.attendee, index=True)
     is_active: Mapped[bool] = mapped_column(Boolean, default=True)
     created_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow)
-    attendee_profile: Mapped["AttendeeProfile | None"] = relationship(back_populates="user", uselist=False)
+    attendee_profile: Mapped[Optional["AttendeeProfile"]] = relationship(back_populates="user", uselist=False)
 
 
 class AttendeeProfile(Base):
