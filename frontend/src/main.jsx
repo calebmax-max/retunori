@@ -116,7 +116,14 @@ function RetreatCard({ retreat, tickets = [] }) { const image = retreat.images?.
 function EventCountdown({ target }) { const [left, setLeft] = useState(Math.max(0, new Date(target).getTime() - Date.now())); useEffect(() => { const timer = window.setInterval(() => setLeft(Math.max(0, new Date(target).getTime() - Date.now())), 1000); return () => window.clearInterval(timer) }, [target]); const days = Math.floor(left / 86400000); const hours = Math.floor(left / 3600000) % 24; const minutes = Math.floor(left / 60000) % 60; const seconds = Math.floor(left / 1000) % 60; return <div className="event-countdown"><span><strong>{days}</strong><small>Days</small></span><span><strong>{String(hours).padStart(2, '0')}</strong><small>Hours</small></span><span><strong>{String(minutes).padStart(2, '0')}</strong><small>Minutes</small></span><span><strong>{String(seconds).padStart(2, '0')}</strong><small>Seconds</small></span></div> }
 function Home() {
   const [retreats, setRetreats] = useState([]); const [home, setHome] = useState(null); const [tickets, setTickets] = useState([]); const [now, setNow] = useState(Date.now())
-  useEffect(() => { Promise.all([api.get('/retreats'), api.get('/homepage')]).then(([retreatResponse, homeResponse]) => { setRetreats(retreatResponse.data); setHome(homeResponse.data) }).catch(() => {}) ; if (localStorage.getItem('retunori_token')) api.get('/me/tickets').then(response => setTickets(response.data)).catch(() => {}) }, [])
+  useEffect(() => {
+    Promise.all([api.get('/retreats'), api.get('/homepage')]).then(([retreatResponse, homeResponse]) => { setRetreats(retreatResponse.data); setHome(homeResponse.data) }).catch(() => {})
+    let user = null
+    try { user = JSON.parse(localStorage.getItem('retunori_user') || 'null') } catch {}
+    if (localStorage.getItem('retunori_token') && user?.role === 'attendee') {
+      api.get('/me/tickets').then(response => setTickets(response.data)).catch(() => {})
+    }
+  }, [])
   useEffect(() => { const timer = window.setInterval(() => setNow(Date.now()), 30000); return () => window.clearInterval(timer) }, [])
   const featured = home?.featured_retreats?.length ? home.featured_retreats : retreats
   const upcomingRetreats = [...retreats].filter(item => new Date(item.ends_at).getTime() >= now).sort((a, b) => {
